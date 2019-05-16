@@ -9,3 +9,10 @@ The attendance details are sent to AWS IoT thing which is handled by Lambda Func
 
 The device is also configured with buttons to answer questions for the professor asked during the class which is communicated via LoRa protocol.
 The server manages the student answers at a particular time 
+
+Files descriotion
+index.js: Lambda function for intime
+main-client.cpp: Student device code
+main.cpp: Main Server code
+index2.js: out time code (Lambda function)
+
