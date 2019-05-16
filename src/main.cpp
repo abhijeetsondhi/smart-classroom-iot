@@ -11,11 +11,19 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <WiFiUdp.h>
+#include "pins_arduino.h"
 #include <NTPClient.h>
+#include<SPI.h>
+#include<LoRa.h>
 
 using namespace std;
 int scanTime = 5; 
 BLEScan* pBLEScan;
+ BLEClient*  pClient ;
+static BLERemoteCharacteristic* pRemoteCharacteristic;
+BLERemoteService* pRemoteService;
+static BLEUUID serviceUUID("1366e33f-7ddb-4891-a3d2-03abe2a703c1");
+static BLEUUID    charUUID("8b5e9d07-b509-4d68-b983-becfea66f9c4");
 const char* ssid = "LAPTOP-P4HHO4P1";
 const char* password = "Abcd1233";
 const char* awsEndpoint = "a1y1zh2yxjgx9j-ats.iot.us-west-2.amazonaws.com";
@@ -101,10 +109,16 @@ const char* rootCA = \
 "-----END CERTIFICATE-----\n";
 
 WiFiClientSecure wiFiClient;
+static BLEAdvertisedDevice* myDevice;
+
 void msgReceived(char* topic, byte* payload, unsigned int len);
 PubSubClient pubSubClient(awsEndpoint, 8883, msgReceived, wiFiClient);
 void pubSubCheckConnect();
 set<string> student_data;
+std::map<string,string> answer;
+void onReceive(int packetSize);
+
+
 void setup() {
   Serial.begin(9600);
   Serial.println("Scanning...");
@@ -126,15 +140,28 @@ void setup() {
   wiFiClient.setCACert(rootCA);
   wiFiClient.setCertificate(certificate_pem_crt);
   wiFiClient.setPrivateKey(private_pem_key);
+
+
+  SPI.begin(LORA_SCK,LORA_MISO,LORA_MOSI,LORA_CS);
+ LoRa.setSPI(SPI);
+ LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
+  Serial.println("LoRa Receiver");
+    if (!LoRa.begin(915E6)) {
+    Serial.println("Starting LoRa failed!");
+    while (1);
+  }
+  LoRa.onReceive(onReceive);
+  LoRa.receive();
 }
 
+
+
+
 void loop() {
-  static BLEAdvertisedDevice* myDevice;
   // put your main code here, to run repeatedly:
   pubSubCheckConnect();
   set<string> tempData;
   BLEScanResults foundDevices = pBLEScan->start(scanTime, false);
-  myDevice = new BLEAdvertisedDevice(foundDevices.getDevice(1));
   for(int i=0;i<foundDevices.getCount();i++)
   {
       String x = foundDevices.getDevice(i).toString().c_str();
@@ -158,9 +185,9 @@ void loop() {
         char JSONmessageBuffer[100];
         JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
         boolean rc = pubSubClient.publish(topic,JSONmessageBuffer);
-        Serial.print("Published, rc="); 
-        Serial.println(JSONmessageBuffer);
         student_data.insert(realData.c_str());
+        Serial.print(realData.c_str());
+        Serial.println(" came to class!!");
       }
     }
   }
@@ -177,27 +204,55 @@ void loop() {
             char JSONmessageBuffer[100];
             JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
             boolean rc = pubSubClient.publish(topic2,JSONmessageBuffer);
-            Serial.print("Published, rc="); 
-            Serial.println(JSONmessageBuffer);
             student_data.erase(f);
-            Serial.println(f.c_str());
-            Serial.println("deleted");
+            answer.erase(f);
+            Serial.print(f.c_str());
+            Serial.println(" left the class!!");
         }
       }
   }
+  else
+  {
+    Serial.println("----------------------------------");
+    if(student_data.size() > 0)
+    {
+    if(answer.size() == 0)
+    {
+      Serial.println("No answers from students!!");
+    }
+    else
+    {
+    std::map<string, string>::iterator it;
+    for ( it = answer.begin(); it != answer.end(); it++ )
+    {
+        string name = it->first;
+        string val = it->second;
+        Serial.print(name.c_str());
+        Serial.print(" answered ");
+        Serial.println(val.c_str());
+    }
+    }
+    }
+    else
+    {
+      Serial.println("No students present");
+    }
+    Serial.println("----------------------------------");
+  }
   pBLEScan->clearResults();
+  pClient = NULL;
   delay(5000);
 }
 
 
 void msgReceived(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message received on "); 
-  Serial.print(topic); 
-  Serial.print(": ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char) payload[i]);
-  }
-  Serial.println();
+  // Serial.print("Message received on "); 
+  // Serial.print(topic); 
+  // Serial.print(": ");
+  // for (int i = 0; i < length; i++) {
+  //   Serial.print((char) payload[i]);
+  // }
+  // Serial.println();
 }
 
 void pubSubCheckConnect() {
@@ -213,4 +268,19 @@ void pubSubCheckConnect() {
     pubSubClient.subscribe(subscribeTopic);
   }
   pubSubClient.loop();
+}
+
+void onReceive(int packetSize) {
+
+  String sname;
+  for (int i = 0; i < packetSize; i++) {
+    sname.concat((char)LoRa.read());
+  }
+
+  if(isDigit(sname.substring(0,2)[0] ) && isDigit(sname.substring(0,2)[1] ) && student_data.find(sname.substring(0,sname.indexOf('-')).c_str()) != student_data.end())
+  {
+    answer[sname.substring(0,sname.indexOf('-')).c_str()] = sname.substring(sname.indexOf('-')+1).c_str();
+  }
+
+
 }
